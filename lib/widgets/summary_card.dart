@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../main.dart'; // For Expense class
+import '../main.dart';
 
 class SummaryCard extends StatelessWidget {
   final double total;

@@ -40,7 +40,7 @@ class ExpenseListItem extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w500),
         ),
         subtitle: Text(
-          'R\$ ${expense.amount.toStringAsFixed(2)}', // Corrected string interpolation
+          'R\$ ${expense.amount.toStringAsFixed(2)}',
           style: const TextStyle(color: Colors.black54),
         ),
         trailing: Row(
@@ -61,7 +61,7 @@ class ExpenseListItem extends StatelessWidget {
                     return AlertDialog(
                       title: const Text('Confirmar Exclusão'),
                       content: Text(
-                        'Tem certeza que deseja excluir "${expense.title}"?', // Corrected string interpolation
+                        'Tem certeza que deseja excluir "${expense.title}"?',
                       ),
                       actions: <Widget>[
                         TextButton(
