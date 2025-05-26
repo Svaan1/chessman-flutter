@@ -69,6 +69,62 @@ class _ExpenseListPageState extends State<ExpenseListPage> {
     );
   }
 
+  Future<void> _saveExpensesToFile() async {
+    if (expenses.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Nenhum gasto para salvar.'),
+          backgroundColor: Colors.orange[700],
+        ),
+      );
+      return;
+    }
+
+    try {
+      String? outputFile = await FilePicker.platform.saveFile(
+        dialogTitle: 'Salvar gastos em arquivo:',
+        fileName: 'gastos.csv',
+        allowedExtensions: ['csv', 'txt'],
+        type: FileType.custom,
+      );
+
+      if (outputFile != null) {
+        // Ensure the filename has an extension if the user didn't provide one
+        String filePath = outputFile;
+        if (!outputFile.toLowerCase().endsWith('.csv') && !outputFile.toLowerCase().endsWith('.txt')) {
+          // Default to .csv if no valid extension is part of the name
+          filePath = '$outputFile.csv';
+        }
+
+        final File file = File(filePath);
+        String fileContent = expenses.map((e) => '${e.title},${e.amount.toStringAsFixed(2).replaceAll(',', '.')}').join('\n');
+        await file.writeAsString(fileContent);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gastos salvos em "$filePath" com sucesso!'),
+            backgroundColor: Colors.teal[700],
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Operação de salvar cancelada.'),
+            backgroundColor: Colors.grey[700],
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error saving expenses: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao salvar gastos: ${e.toString()}'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
   void _simulateLoadExpensesFromFile() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
@@ -149,6 +205,11 @@ class _ExpenseListPageState extends State<ExpenseListPage> {
             onPressed: _simulateLoadExpensesFromFile,
             icon: const Icon(Icons.file_open_outlined),
             tooltip: 'Importar Gastos (Simulado)',
+          ),
+          IconButton(
+            onPressed: _saveExpensesToFile, // Added this button
+            icon: const Icon(Icons.save_alt_outlined),
+            tooltip: 'Salvar Gastos',
           ),
           IconButton(
             onPressed: _navigateToFreePage,
