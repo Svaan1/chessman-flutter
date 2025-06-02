@@ -1,13 +1,21 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
-import 'package:file_picker/file_picker.dart';
-import 'dart:io';
 import 'widgets/expense_list_item.dart';
 import 'widgets/empty_expenses_view.dart';
 import 'widgets/summary_card.dart';
 import 'widgets/breakdown_card.dart';
+import 'database_helper.dart';
+import 'dart:io' show Platform; // Added for platform checking
+import 'package:sqflite_common_ffi/sqflite_ffi.dart'; // Added for FFI
 
-void main() {
+Future<void> main() async { // Modified to be async
+  WidgetsFlutterBinding.ensureInitialized(); // Ensure bindings are initialized
+
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
+
   runApp(MaterialApp(
     theme: ThemeData(
       primarySwatch: Colors.teal,
@@ -18,10 +26,27 @@ void main() {
 }
 
 class Expense {
+  int? id;
   String title;
   double amount;
 
-  Expense(this.title, this.amount);
+  Expense({this.id, required this.title, required this.amount});
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'title': title,
+      'amount': amount,
+    };
+  }
+
+  factory Expense.fromMap(Map<String, dynamic> map) {
+    return Expense(
+      id: map['id'],
+      title: map['title'],
+      amount: map['amount'],
+    );
+  }
 }
 
 class ExpenseListPage extends StatefulWidget {
@@ -31,6 +56,20 @@ class ExpenseListPage extends StatefulWidget {
 
 class _ExpenseListPageState extends State<ExpenseListPage> {
   List<Expense> expenses = [];
+  final dbHelper = DatabaseHelper();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExpenses();
+  }
+
+  Future<void> _loadExpenses() async {
+    final loadedExpenses = await dbHelper.getExpenses();
+    setState(() {
+      expenses = loadedExpenses;
+    });
+  }
 
   void _navigateToForm({Expense? expense, int? index}) async {
     final result = await Navigator.push(
@@ -40,13 +79,13 @@ class _ExpenseListPageState extends State<ExpenseListPage> {
       ),
     );
     if (result != null && result is Expense) {
-      setState(() {
-        if (index != null) {
-          expenses[index] = result;
-        } else {
-          expenses.add(result);
-        }
-      });
+      if (expense != null && index != null) {
+        result.id = expense.id;
+        await dbHelper.updateExpense(result);
+      } else {
+        await dbHelper.insertExpense(result);
+      }
+      _loadExpenses();
     }
   }
 
@@ -57,138 +96,21 @@ class _ExpenseListPageState extends State<ExpenseListPage> {
     );
   }
 
-  void _deleteExpense(int index, String title) {
-    setState(() {
-      expenses.removeAt(index);
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('"$title" excluído.'),
-        backgroundColor: Colors.redAccent,
-      ),
-    );
-  }
-
-  Future<void> _saveExpensesToFile() async {
-    if (expenses.isEmpty) {
+  void _deleteExpense(int index, String title) async {
+    int? expenseId = expenses[index].id;
+    if (expenseId != null) {
+      await dbHelper.deleteExpense(expenseId);
+      _loadExpenses();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Nenhum gasto para salvar.'),
-          backgroundColor: Colors.orange[700],
-        ),
-      );
-      return;
-    }
-
-    try {
-      String? outputFile = await FilePicker.platform.saveFile(
-        dialogTitle: 'Salvar gastos em arquivo:',
-        fileName: 'gastos.csv',
-        allowedExtensions: ['csv', 'txt'],
-        type: FileType.custom,
-      );
-
-      if (outputFile != null) {
-        // Ensure the filename has an extension if the user didn't provide one
-        String filePath = outputFile;
-        if (!outputFile.toLowerCase().endsWith('.csv') && !outputFile.toLowerCase().endsWith('.txt')) {
-          // Default to .csv if no valid extension is part of the name
-          filePath = '$outputFile.csv';
-        }
-
-        final File file = File(filePath);
-        String fileContent = expenses.map((e) => '${e.title},${e.amount.toStringAsFixed(2).replaceAll(',', '.')}').join('\n');
-        await file.writeAsString(fileContent);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Gastos salvos em "$filePath" com sucesso!'),
-            backgroundColor: Colors.teal[700],
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Operação de salvar cancelada.'),
-            backgroundColor: Colors.grey[700],
-          ),
-        );
-      }
-    } catch (e) {
-      print('Error saving expenses: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao salvar gastos: ${e.toString()}'),
+          content: Text('"$title" excluído.'),
           backgroundColor: Colors.redAccent,
         ),
       );
-    }
-  }
-
-  void _simulateLoadExpensesFromFile() async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['csv', 'txt'],
-      );
-
-      if (result != null && result.files.single.path != null) {
-        File file = File(result.files.single.path!);
-        String content = await file.readAsString();
-        List<String> lines = content.split('\n');
-        List<Expense> importedExpenses = [];
-        int lineNumber = 0;
-
-        for (String line in lines) {
-          lineNumber++;
-          if (line.trim().isEmpty) continue;
-
-          List<String> parts = line.split(',');
-          if (parts.length == 2) {
-            String title = parts[0].trim();
-            double? amount = double.tryParse(parts[1].trim());
-
-            if (title.isNotEmpty && amount != null && amount > 0) {
-              importedExpenses.add(Expense(title, amount));
-            } else {
-              print('Skipping invalid line $lineNumber: "$line" - Invalid format or amount.');
-            }
-          } else {
-            print('Skipping invalid line $lineNumber: "$line" - Expected 2 parts, got ${parts.length}.');
-          }
-        }
-
-        if (importedExpenses.isNotEmpty) {
-          setState(() {
-            expenses.addAll(importedExpenses);
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('${importedExpenses.length} gastos importados com sucesso!'),
-              backgroundColor: Colors.teal[700],
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Nenhum gasto válido encontrado no arquivo ou formato incorreto (esperado: descrição,valor).'),
-              backgroundColor: Colors.orange[700],
-            ),
-          );
-        }
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Importação cancelada.'),
-            backgroundColor: Colors.grey[700],
-          ),
-        );
-      }
-    } catch (e) {
-      print('Error importing expenses: $e');
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Erro ao importar gastos: ${e.toString()}'),
+          content: Text('Erro ao excluir "$title": ID não encontrado.'),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -201,16 +123,6 @@ class _ExpenseListPageState extends State<ExpenseListPage> {
       appBar: AppBar(
         title: const Text('Controle de Gastos'),
         actions: [
-          IconButton(
-            onPressed: _simulateLoadExpensesFromFile,
-            icon: const Icon(Icons.file_open_outlined),
-            tooltip: 'Importar Gastos (Simulado)',
-          ),
-          IconButton(
-            onPressed: _saveExpensesToFile, // Added this button
-            icon: const Icon(Icons.save_alt_outlined),
-            tooltip: 'Salvar Gastos',
-          ),
           IconButton(
             onPressed: _navigateToFreePage,
             icon: const Icon(Icons.analytics_outlined),
@@ -262,7 +174,6 @@ class _ExpenseFormPageState extends State<ExpenseFormPage> {
     super.initState();
     if (widget.expense != null) {
       titleController.text = widget.expense!.title;
-      // Ensure the amount is formatted with a period for consistency with parsing
       amountController.text = widget.expense!.amount.toStringAsFixed(2).replaceAll(',', '.');
     }
   }
@@ -271,10 +182,10 @@ class _ExpenseFormPageState extends State<ExpenseFormPage> {
     if (_formKey.currentState!.validate()) {
       final title = titleController.text.trim();
       final amount = double.parse(amountController.text.replaceAll(',', '.'));
-      Navigator.pop(context, Expense(title, amount));
+      Navigator.pop(context, Expense(title: title, amount: amount));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Gasto "${title}" salvo com sucesso!'),
+          content: Text('Gasto "$title" salvo com sucesso!'),
           backgroundColor: Colors.green,
         ),
       );
