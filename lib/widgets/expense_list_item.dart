@@ -4,8 +4,9 @@ import '../main.dart';
 class ExpenseListItem extends StatelessWidget {
   final Expense expense;
   final int index;
-  final void Function({Expense? expense, int? index}) onEdit;
+  final void Function(Expense expense, int? index) onEdit;
   final void Function(int index, String title) onDelete;
+  final void Function(Expense expense) onDeleteCallback;
 
   const ExpenseListItem({
     super.key,
@@ -13,6 +14,7 @@ class ExpenseListItem extends StatelessWidget {
     required this.index,
     required this.onEdit,
     required this.onDelete,
+    required this.onDeleteCallback,
   });
 
   @override
@@ -40,7 +42,7 @@ class ExpenseListItem extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w500),
         ),
         subtitle: Text(
-          'R\$ ${expense.amount.toStringAsFixed(2)}', // Corrected string interpolation
+          'R\$ ${expense.amount.toStringAsFixed(2)}',
           style: const TextStyle(color: Colors.black54),
         ),
         trailing: Row(
@@ -49,7 +51,7 @@ class ExpenseListItem extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.edit, color: Colors.blueGrey),
               tooltip: 'Editar',
-              onPressed: () => onEdit(expense: expense, index: index),
+              onPressed: () => onEdit(expense, index),
             ),
             IconButton(
               icon: const Icon(Icons.delete, color: Colors.redAccent),
@@ -61,7 +63,7 @@ class ExpenseListItem extends StatelessWidget {
                     return AlertDialog(
                       title: const Text('Confirmar Exclusão'),
                       content: Text(
-                        'Tem certeza que deseja excluir "${expense.title}"?', // Corrected string interpolation
+                        'Tem certeza que deseja excluir "${expense.title}"?',
                       ),
                       actions: <Widget>[
                         TextButton(
@@ -76,7 +78,7 @@ class ExpenseListItem extends StatelessWidget {
                             style: TextStyle(color: Colors.red),
                           ),
                           onPressed: () {
-                            onDelete(index, expense.title);
+                            onDeleteCallback(expense);
                             Navigator.of(context).pop();
                           },
                         ),
@@ -88,7 +90,7 @@ class ExpenseListItem extends StatelessWidget {
             ),
           ],
         ),
-        onTap: () => onEdit(expense: expense, index: index),
+        onTap: () => onEdit(expense, index),
       ),
     );
   }

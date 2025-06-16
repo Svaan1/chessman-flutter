@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
-import '../main.dart'; // For Expense class
+import '../main.dart';
 
 class SummaryCard extends StatelessWidget {
-  final double total;
+  final double totalExpenses;
   final int count;
   final Expense? highestExpense;
 
   const SummaryCard({
     super.key,
-    required this.total,
+    required this.totalExpenses,
     required this.count,
     this.highestExpense,
   });
@@ -34,7 +34,7 @@ class SummaryCard extends StatelessWidget {
               ),
             ),
             const Divider(height: 24),
-            _buildSummaryRow('Total Gasto:', 'R\$ ${total.toStringAsFixed(2)}'),
+            _buildSummaryRow('Total Gasto:', 'R\$ ${totalExpenses.toStringAsFixed(2)}'),
             _buildSummaryRow('Número de Lançamentos:', '$count'),
             if (highestExpense != null)
               _buildSummaryRow(

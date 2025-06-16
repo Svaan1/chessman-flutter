@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "753661791087",
+    "project_id": "chessman-flutter",
+    "storage_bucket": "chessman-flutter.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:753661791087:android:cac6026b8cce2e094eb69a",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyClE6MmBLrh2Nf2ixyeu1sHQnW_m4i03DM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,20 +1,19 @@
 import 'package:flutter/material.dart';
-import 'dart:math';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'widgets/expense_list_item.dart';
 import 'widgets/empty_expenses_view.dart';
 import 'widgets/summary_card.dart';
 import 'widgets/breakdown_card.dart';
-import 'database_helper.dart';
-import 'dart:io' show Platform; // Added for platform checking
-import 'package:sqflite_common_ffi/sqflite_ffi.dart'; // Added for FFI
 
-Future<void> main() async { // Modified to be async
-  WidgetsFlutterBinding.ensureInitialized(); // Ensure bindings are initialized
+import 'firebase_options.dart';
 
-  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
-  }
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   runApp(MaterialApp(
     theme: ThemeData(
@@ -26,7 +25,7 @@ Future<void> main() async { // Modified to be async
 }
 
 class Expense {
-  int? id;
+  String? id;
   String title;
   double amount;
 
@@ -34,17 +33,20 @@ class Expense {
 
   Map<String, dynamic> toMap() {
     return {
-      'id': id,
       'title': title,
       'amount': amount,
     };
   }
 
-  factory Expense.fromMap(Map<String, dynamic> map) {
+  factory Expense.fromFirestore(
+    DocumentSnapshot<Map<String, dynamic>> snapshot,
+    SnapshotOptions? options,
+  ) {
+    final data = snapshot.data();
     return Expense(
-      id: map['id'],
-      title: map['title'],
-      amount: map['amount'],
+      id: snapshot.id,
+      title: data?['title'] ?? '',
+      amount: (data?['amount'] as num?)?.toDouble() ?? 0.0,
     );
   }
 }
@@ -55,23 +57,13 @@ class ExpenseListPage extends StatefulWidget {
 }
 
 class _ExpenseListPageState extends State<ExpenseListPage> {
-  List<Expense> expenses = [];
-  final dbHelper = DatabaseHelper();
+  final CollectionReference<Expense> _expensesCollection =
+      FirebaseFirestore.instance.collection('expenses').withConverter<Expense>(
+            fromFirestore: Expense.fromFirestore,
+            toFirestore: (Expense expense, _) => expense.toMap(),
+          );
 
-  @override
-  void initState() {
-    super.initState();
-    _loadExpenses();
-  }
-
-  Future<void> _loadExpenses() async {
-    final loadedExpenses = await dbHelper.getExpenses();
-    setState(() {
-      expenses = loadedExpenses;
-    });
-  }
-
-  void _navigateToForm({Expense? expense, int? index}) async {
+  void _navigateToForm({Expense? expense}) async {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -79,38 +71,34 @@ class _ExpenseListPageState extends State<ExpenseListPage> {
       ),
     );
     if (result != null && result is Expense) {
-      if (expense != null && index != null) {
-        result.id = expense.id;
-        await dbHelper.updateExpense(result);
+      if (expense != null && expense.id != null) {
+        await _expensesCollection.doc(expense.id).update(result.toMap());
       } else {
-        await dbHelper.insertExpense(result);
+        await _expensesCollection.add(result);
       }
-      _loadExpenses();
     }
   }
 
-  void _navigateToFreePage() {
+  void _navigateToFreePage(List<Expense> currentExpenses) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => FreePage(expenses: expenses)),
+      MaterialPageRoute(builder: (context) => FreePage(expenses: currentExpenses)),
     );
   }
 
-  void _deleteExpense(int index, String title) async {
-    int? expenseId = expenses[index].id;
-    if (expenseId != null) {
-      await dbHelper.deleteExpense(expenseId);
-      _loadExpenses();
+  void _deleteExpense(Expense expenseToDelete) async {
+    if (expenseToDelete.id != null) {
+      await _expensesCollection.doc(expenseToDelete.id).delete();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('"$title" excluído.'),
+          content: Text('"${expenseToDelete.title}" excluído.'),
           backgroundColor: Colors.redAccent,
         ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Erro ao excluir "$title": ID não encontrado.'),
+          content: Text('Erro ao excluir "${expenseToDelete.title}": ID não encontrado.'),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -119,38 +107,59 @@ class _ExpenseListPageState extends State<ExpenseListPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Controle de Gastos'),
-        actions: [
-          IconButton(
-            onPressed: _navigateToFreePage,
-            icon: const Icon(Icons.analytics_outlined),
-            tooltip: 'Ver Resumo',
+    return StreamBuilder<QuerySnapshot<Expense>>(
+      stream: _expensesCollection.orderBy('title').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Controle de Gastos (Firebase)')),
+            body: Center(child: Text('Erro ao carregar dados: ${snapshot.error}')),
+          );
+        }
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Controle de Gastos (Firebase)')),
+            body: const Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final expenses = snapshot.data?.docs.map((doc) => doc.data()).toList() ?? [];
+
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Controle de Gastos (Firebase)'),
+            actions: [
+              IconButton(
+                onPressed: () => _navigateToFreePage(expenses),
+                icon: const Icon(Icons.analytics_outlined),
+                tooltip: 'Ver Resumo',
+              ),
+            ],
           ),
-        ],
-      ),
-      body: expenses.isEmpty
-          ? const EmptyExpensesView()
-          : ListView.builder(
-              padding: const EdgeInsets.all(8.0),
-              itemCount: expenses.length,
-              itemBuilder: (context, index) {
-                final expense = expenses[index];
-                return ExpenseListItem(
-                  expense: expense,
-                  index: index,
-                  onEdit: _navigateToForm,
-                  onDelete: _deleteExpense,
-                );
-              },
-            ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _navigateToForm(),
-        icon: const Icon(Icons.add),
-        label: const Text('Adicionar'),
-        tooltip: 'Adicionar Novo Gasto',
-      ),
+          body: expenses.isEmpty
+              ? const EmptyExpensesView()
+              : ListView.builder(
+                  padding: const EdgeInsets.all(8.0),
+                  itemCount: expenses.length,
+                  itemBuilder: (context, index) {
+                    final expense = expenses[index];
+                    return ExpenseListItem(
+                      expense: expense,
+                      index: index,
+                      onEdit: (expFromItem, idxFromItem) => _navigateToForm(expense: expFromItem),
+                      onDeleteCallback: _deleteExpense,
+                      onDelete: (idx, title) => _deleteExpense(expense),
+                    );
+                  },
+                ),
+          floatingActionButton: FloatingActionButton.extended(
+            onPressed: () => _navigateToForm(),
+            icon: const Icon(Icons.add),
+            label: const Text('Adicionar'),
+            tooltip: 'Adicionar Novo Gasto',
+          ),
+        );
+      },
     );
   }
 }
@@ -182,7 +191,7 @@ class _ExpenseFormPageState extends State<ExpenseFormPage> {
     if (_formKey.currentState!.validate()) {
       final title = titleController.text.trim();
       final amount = double.parse(amountController.text.replaceAll(',', '.'));
-      Navigator.pop(context, Expense(title: title, amount: amount));
+      Navigator.pop(context, Expense(id: widget.expense?.id, title: title, amount: amount));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Gasto "$title" salvo com sucesso!'),
@@ -203,77 +212,59 @@ class _ExpenseFormPageState extends State<ExpenseFormPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.expense == null ? 'Novo Gasto' : 'Editar Gasto'),
+        title: Text(widget.expense == null ? 'Adicionar Gasto' : 'Editar Gasto'),
       ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextFormField(
-                  controller: titleController,
-                  decoration: InputDecoration(
-                    labelText: 'Descrição',
-                    hintText: 'Ex: Almoço, Transporte',
-                    prefixIcon: const Icon(Icons.description_outlined),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8.0),
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Por favor, insira uma descrição.';
-                    }
-                    return null;
-                  },
-                  textCapitalization: TextCapitalization.sentences,
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              TextFormField(
+                controller: titleController,
+                decoration: const InputDecoration(
+                  labelText: 'Título',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.title),
                 ),
-                const SizedBox(height: 20),
-                TextFormField(
-                  controller: amountController,
-                  decoration: InputDecoration(
-                    labelText: 'Valor',
-                    prefixText: 'R\$ ',
-                    prefixIcon: const Icon(Icons.attach_money),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8.0),
-                    ),
-                    hintText: '0.00',
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Por favor, insira um valor.';
-                    }
-                    final number = double.tryParse(value.replaceAll(',', '.'));
-                    if (number == null) {
-                      return 'Por favor, insira um número válido.';
-                    }
-                    if (number <= 0) {
-                      return 'O valor deve ser maior que zero.';
-                    }
-                    return null;
-                  },
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Por favor, insira um título.';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: amountController,
+                decoration: const InputDecoration(
+                  labelText: 'Valor (R\$)',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.attach_money),
                 ),
-                const SizedBox(height: 30),
-                ElevatedButton.icon(
-                  onPressed: _save,
-                  icon: const Icon(Icons.save_alt),
-                  label: const Text('Salvar Gasto'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 15),
-                    textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8.0),
-                    ),
-                    elevation: 3,
-                  ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Por favor, insira um valor.';
+                  }
+                  if (double.tryParse(value.replaceAll(',', '.')) == null) {
+                    return 'Por favor, insira um número válido.';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _save,
+                icon: const Icon(Icons.save),
+                label: const Text('Salvar'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  textStyle: const TextStyle(fontSize: 16),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -284,42 +275,56 @@ class _ExpenseFormPageState extends State<ExpenseFormPage> {
 class FreePage extends StatelessWidget {
   final List<Expense> expenses;
 
-  const FreePage({super.key, required this.expenses});
+  const FreePage({Key? key, required this.expenses}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    double total = expenses.fold(0, (sum, e) => sum + e.amount);
-    Expense? highestExpense = expenses.isEmpty
-        ? null
-        : expenses.reduce((a, b) => a.amount > b.amount ? a : b);
-    Map<String, double> expensesByTitle = {};
-    for (var e in expenses) {
-      expensesByTitle[e.title] = (expensesByTitle[e.title] ?? 0) + e.amount;
+    double totalExpenses = expenses.fold(0, (sum, item) => sum + item.amount);
+    int expenseCount = expenses.length;
+    Expense? highestExpense = expenses.isNotEmpty
+        ? expenses.reduce((curr, next) => curr.amount > next.amount ? curr : next)
+        : null;
+
+    Map<String, double> breakdown = {};
+    for (var expense in expenses) {
+      breakdown.update(expense.title, (value) => value + expense.amount, ifAbsent: () => expense.amount);
     }
-    var sortedExpenses = expensesByTitle.entries.toList()
+
+    var sortedBreakdown = breakdown.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Resumo de Gastos')),
-      body: expenses.isEmpty
-          ? const Center(
-              child: Text('Nenhum gasto registrado para exibir o resumo.'),
-            )
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                SummaryCard(
-                  total: total,
-                  count: expenses.length,
-                  highestExpense: highestExpense,
-                ),
-                const SizedBox(height: 16),
-                BreakdownCard(
-                  sortedExpenses: sortedExpenses,
-                  total: total,
-                ),
-              ],
+      appBar: AppBar(
+        title: const Text('Resumo dos Gastos'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SummaryCard(
+              totalExpenses: totalExpenses,
+              count: expenseCount,
+              highestExpense: highestExpense,
             ),
+            const SizedBox(height: 20),
+            const Text('Detalhamento:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Expanded(
+              child: ListView.builder(
+                itemCount: sortedBreakdown.length,
+                itemBuilder: (context, index) {
+                  final entry = sortedBreakdown[index];
+                  return BreakdownCard(
+                    category: entry.key,
+                    amount: entry.value,
+                    total: totalExpenses,
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
